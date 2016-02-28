@@ -8,3 +8,6 @@ http://www.runoob.com/git/git-tutorial.html
 
 sudo apt-get install git  或   sudo apt-get install git-core
 
+设置用户名和邮件
+$ git config --global user.name "Your Name"
+$ git config --global user.email "email@example.com"
