@@ -27,5 +27,11 @@ git init  使用当前目录作为Git仓库，该命令执行完后会在当期�
 git init newrepo   使用指定目录作为Git仓库，初始化后，会在 newrepo 目录下会出现一个名为 .git 的目录，所有 Git 需要的数据和资源都存放在这个目录中
 
 
+第一步，用命令git add告诉Git，把文件添加到仓库：
+git add readme.txt
 
+第二步，用命令git commit告诉Git，把文件提交到仓库：
+git commit -m readme.txt
+
+git status 以查看在你上次提交之后是否有修改
 
