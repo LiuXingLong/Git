@@ -60,11 +60,14 @@ your_email@youremail.com改为你在github上注册的邮箱之后会要求确�
 回到github上，进入 Account Settings（账户配置），左边选择SSH Keys，Add SSH Key,title随便填，粘贴在你电脑上生成的key。
 
 验证是否成功：
-$ ssh -T git@github.com
+ssh -T git@github.com
 Hi tianqixin! You've successfully authenticated, but GitHub does not provide shell access.    连接成功
 
-$ git remote add origin git@github.com:tianqixin/w3cschool.cc.git（将当前创库的项目提交到 git@github.com:tianqixin/w3cschool.cc.git 创库）
-$ git push -u origin master
+更新远程创库
+git remote add origin git@github.com:tianqixin/w3cschool.cc.git（将当前创库的项目提交到 git@github.com:tianqixin/w3cschool.cc.git 创库）
+git push -u origin master
 
 
+克隆一个远程创库到本地：
+git clone git@github.com:michaelliao/gitskills.git（ git@github.com:michaelliao/gitskills.git 克隆创库地址 ）
 
