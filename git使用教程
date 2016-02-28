@@ -8,6 +8,10 @@ http://www.runoob.com/git/git-tutorial.html
 
 sudo apt-get install git  或   sudo apt-get install git-core
 
-设置用户名和邮件
+设置名字和Email地址
+
 $ git config --global user.name "Your Name"
 $ git config --global user.email "email@example.com"
+
+注意git config命令的--global参数，用了这个参数，表示你这台机器上所有的Git仓库都会使用这个配置，当然也可以对某个仓库指定不同的用户名和Email地址。
+
