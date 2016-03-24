@@ -28,6 +28,8 @@ git config --list
 git init  使用当前目录作为Git仓库，该命令执行完后会在当期目录生成一个 .git 目录
 git init newrepo   使用指定目录作为Git仓库，初始化后，会在 newrepo 目录下会出现一个名为 .git 的目录，所有 Git 需要的数据和资源都存放在这个目录中
 
+删除仓库   rm -rf 仓库名
+
 
 第一步，用命令git add告诉Git，把文件添加到仓库：
 git add readme.txt
