@@ -1,0 +1,501 @@
+gitlab 安装
+
+1、防火强安装配置
+
+安装firewalld
+yum install firewalld firewall-config
+
+运行、停止、禁用firewalld
+systemctl start  firewalld
+systemctl status firewalld 或者 firewall-cmd --state
+systemctl disable firewalld
+systemctl stop firewalld
+
+查看开放端口
+firewall-cmd --zone=public --list-port
+添加开放端口
+firewall-cmd --zone=public --add-port=873/tcp --permanent
+关闭端口
+firewall-cmd --zone=public --remove-port=80/tcp --permanent
+//重启
+firewall-cmd --reload
+
+
+systemctl stop firewalld.service //关闭防火墙 
+systemctl status firewalld.service //查看防火墙状态
+
+
+2、rmp安装10.1.0
+
+sudo yum install curl policycoreutils policycoreutils-python openssh-server openssh-clients
+sudo systemctl enable sshd
+sudo systemctl start sshd
+sudo yum install postfix
+sudo systemctl enable postfix
+sudo systemctl start postfix
+sudo firewall-cmd --permanent --add-service=http
+sudo systemctl reload firewalld
+
+curl -LJO https://mirrors.tuna.tsinghua.edu.cn/gitlab-ce/yum/el7/gitlab-ce-10.1.0-ce.0.el7.x86_64.rpm
+rpm -i gitlab-ce-10.1.0-ce.0.el7.x86_64.rpm
+
+安装版本信息
+cat /opt/gitlab/embedded/service/gitlab-rails/VERSION
+
+重新加载配置
+gitlab-ctl reconfigure
+
+
+3、修改配置文件gitlab.rb
+
+vim /etc/gitlab/gitlab.rb
+将external_url变量的地址修改为gitlab所在centos的ip地址
+
+gitlab-ctl reconfigure
+gitlab-ctl restart
+
+
+4、gitlab汉化
+
+下载汉化包
+git clone https://gitlab.com/xhang/gitlab.git -b v10.1.0-zh
+汉化版本信息
+cat gitlab/VERSION
+
+
+gitlab-ctl stop
+
+cd gitlab(汉化包目录)
+git diff v10.1.0 v10.1.0-zh > ../10.1.0-zh.diff
+
+yum install patch -y
+patch -d /opt/gitlab/embedded/service/gitlab-rails -p1 < ./10.1.0-zh.diff
+
+gitlab-ctl reconfigure
+gitlab-ctl restart
+
+汉化版本500错误处理
+ 
+修改  /opt/gitlab/embedded/service/gitlab-rails/app/views/projects/compare/index.html.haml   14行 缩进问题 %code.ref-name 4eedf23
+
+
+5、配置修改
+
+修改git创库位置：sudo rsync -av /var/opt/gitlab/git-data /data/gitlab/
+
+修改备份路径位置：sudo rsync -av /var/opt/gitlab/backups /data/gitlab/
+
+修改配置文件：vim /etc/gitlab/gitlab.rb （如下内容）
+
+
+external_url 'http://192.168.4.11'
+
+gitlab_rails['time_zone'] = 'Beijing'
+
+gitlab_rails['gitlab_email_from'] = 'noreply@idreamsky.com'
+
+gitlab_rails['manage_backup_path'] = true
+gitlab_rails['backup_path'] = "/data/gitlab/backups"
+
+gitlab_rails['backup_keep_time'] = 172800
+
+ git_data_dirs({
+   "default" => {
+     "path" => "/data/gitlab/git-data",
+     "failure_count_threshold" => 10,
+     "failure_wait_time" => 30,
+     "failure_reset_time" => 1800,
+     "storage_timeout" => 30
+    }
+ })
+
+gitlab_rails['smtp_enable'] = true
+gitlab_rails['smtp_address'] = "mail.idreamsky.com"
+gitlab_rails['smtp_port'] = 25
+gitlab_rails['smtp_user_name'] = "noreply@idreamsky.com"
+gitlab_rails['smtp_password'] = "npnw3x46GCal"
+gitlab_rails['smtp_domain'] = "idreamsky.com"
+gitlab_rails['smtp_authentication'] = "login"
+gitlab_rails['smtp_enable_starttls_auto'] = true
+gitlab_rails['smtp_tls'] = false
+
+unicorn['worker_processes'] = 24
+
+postgresql['shared_buffers'] = "4GB"
+postgresql['max_connections'] = 400
+postgresql['max_worker_processes'] = 24
+
+nginx['worker_processes'] = 24
+nginx['worker_connections'] = 2048
+
+重新加载配置，并重启gitlab
+gitlab-ctl reconfigure
+gitlab-ctl restart
+
+
+6、设置postgresql数据库密码：
+
+su - gitlab-psql
+psql -h /var/opt/gitlab/postgresql -d gitlabhq_production
+\password gitlab
+
+编辑 /etc/gitlab/gitlab.rb 修改下面内容
+gitlab_rails['db_password'] = '这个就是你刚刚在Postgresql中设置的密码'
+
+
+7、设置postgresql数据库远程连接配置
+
+开放防火墙5432端口
+firewall-cmd --zone=public --add-port=5432/tcp --permanent
+firewall-cmd --reload
+
+vim /etc/gitlab/gitlab.rb
+
+postgresql['port'] = 5432
+postgresql['listen_address'] = '0.0.0.0'
+postgresql['md5_auth_cidr_addresses'] = ['192.168.0.0/0']
+重新加载配置，并重启gitlab
+gitlab-ctl reconfigure
+gitlab-ctl restart
+
+8、备份与恢复
+gitlab备份：gitlab-rake gitlab:backup:create CRON=1
+过滤版本库gitlab备份：gitlab-rake gitlab:backup:create SKIP=repositories CRON=1
+执行命令从备份文件中恢复Gitlab：gitlab-rake gitlab:backup:restore BACKUP=备份文件编号
+
+9、自动备份配置
+方案：
+采用gitlab备份方案备份配置信息、rsync远程同步版本库信息，以及生成的配置信息。（每天凌晨两点备份）
+
+线上机备份机都安装 rsync：
+yum install rsync
+
+开放防火墙873端口
+firewall-cmd --zone=public --add-port=873/tcp --permanent
+firewall-cmd --reload
+
+备份模式：
+备份机做服务器、线上机做客户端
+
+1）服务器（备份机器）配置：
+
+mkdir /etc/rsyncd
+#创建主配置文件
+vim /etc/rsyncd/rsyncd.conf 
+port = 873
+pid file = /etc/rsyncd/rsyncd.pid
+motd file= /etc/rsyncd/welcome.msg
+lock file = /etc/rsyncd/rsyncd.lock
+log file = /etc/rsyncd/rsyncd.log
+timeout = 900
+
+#配置某些格式不压缩
+dont compress   = *.gz *.tgz *.zip *.z *.Z *.rpm *.deb *.bz2
+
+[backup]
+#服务器读写目录
+path = /data/gitlab
+comment = gitlab backup path
+use chroot = yes
+#只写选择，只让客户端到服务器上写入
+write only = yes
+#只读选择，只让客户端从服务器上读取文件
+read only = no
+max connections = 5
+list = yes
+uid = root
+gid = root
+secrets file = /etc/rsyncd/rsyncd.secrets
+#允许客户端连接IP地址
+hosts allow = 192.168.143.36
+hosts deny = *
+ignore errors = yes
+transfer logging = yes
+log format = %t %a %m %f %b
+auth users = gitlab
+
+
+#创建用户信息配置文件
+vim /etc/rsyncd/rsyncd.secrets
+gitlab:gitlab
+
+chmod 600 /etc/rsyncd/rsyncd.secrets
+
+#启动服务
+rsync --daemon --config=/etc/rsyncd/rsyncd.conf
+
+#停止服务
+kill `cat /etc/rsyncd/rsyncd.pid` 
+
+2）客户端（线上机器）配置：
+
+#创建用户信息配置文件
+vim /etc/rsyncd/rsyncd.secrets
+gitlab #只保留密码
+chmod 600 /etc/rsyncd/rsyncd.secrets
+
+
+上传整个目录（写）
+rsync -vzrltopg --delete --progress --port=873 --password-file=/etc/rsyncd/rsyncd.secrets /data/gitlab/ gitlab@192.168.143.144::backup
+
+拉去整个目录（读）修改write only、read only
+rsync -vzrltopg --delete --progress --port=873 --password-file=/etc/rsyncd/rsyncd.secrets gitlab@192.168.143.144::backup /data/gitlab/
+
+
+10、客户端（线上机器）自动上传到备份机器脚本
+vim /data/auto_back/rsyncd.sh
+
+#!/bin/sh
+mobile='******'
+IP='192.168.143.36'
+log_date=`date "+%Y-%m"`
+sms_url='http://test.sms.uu.cc:8081/SMS/sa/sms/send'
+error_log_file="/data/log/${log_date}_error_log.txt"
+success_log_file="/data/log/${log_date}_success_log.txt"
+
+#检测命令执行是否成功函数，$1 执行命令  $2 命令功能描述
+function check() {
+   $1 1>/dev/null 2>>${error_log_file}
+   if [ $? == 0 ]
+   then
+      w_time=`date "+%Y-%m-%d %H:%M:%S"`
+      echo "${w_time} | 成功 | $2">> ${success_log_file}
+   else
+      w_time=`date "+%Y-%m-%d %H:%M:%S"`
+      content="${w_time} | 失败 | $2"
+      echo ${content}>> ${error_log_file}
+      echo >> ${error_log_file}
+      curl -d "mobile=${mobile}&content=gitlab线上服务器(IP:${IP})：${content}" ${sms_url} -s >/dev/null
+      exit
+   fi
+}
+
+#将gitlab配置文件 /etc/gitlab/ 移动到上传 /data/gitlab/conf
+log_info="配置文件：/etc/gitlab/ 复制到 /data/gitlab/conf/"
+conf_rsync='rsync -av /etc/gitlab/ /data/gitlab/conf/'
+check "${conf_rsync}" "${log_info}"
+
+
+#执行gitlab本地备份操作
+log_info="gitlab本地备份除版本库信息以外的备份文件"
+gitlab_backups='gitlab-rake gitlab:backup:create SKIP=repositories CRON=1'
+check "${gitlab_backups}" "${log_info}"
+
+
+#执行 rsync 上传同步到备份服务器
+log_info="采用rsync将本地的备份数据同步到远程的备份服务器上"
+backup_rsync='rsync -vzrltopg --delete --progress --port=873 --password-file=/etc/rsyncd/rsyncd.secrets /data/gitlab/ gitlab@192.168.143.144::backup'
+check "${backup_rsync}" "${log_info}"
+
+
+#所有操作成功执行后短信通知
+echo >> ${success_log_file}
+w_time=`date "+%Y-%m-%d %H:%M:%S"`
+curl -d "mobile=${mobile}&content=gitlab线上服务器(IP:${IP})：${w_time} | 同步到备份服务器成功！" ${sms_url} -s >/dev/null
+
+添加定时任务：
+crontab -e
+30 2 * * * /usr/bin/sh /data/auto_back/rsyncd.sh
+
+
+
+11、服务端（备份机器）rsync --daemon 守护脚本
+vim /data/auto_back/start_rsyncd.sh
+
+#!/bin/sh
+mobile='******'
+IP='192.168.143.144'
+pid_file='/etc/rsyncd/rsyncd.pid'
+rsync_start_log='/data/log/start_rsyncd.log'
+sms_url='http://test.sms.uu.cc:8081/SMS/sa/sms/send'
+rsync_start='rsync --daemon --config=/etc/rsyncd/rsyncd.conf'
+rsync_status=$(ps -ef | egrep "rsync --daemon.*rsyncd.conf" | grep -v 'grep')
+
+if [ "${rsync_status}" == "" ]
+then
+   rm -f ${pid_file}
+   ${rsync_start}
+   if [ $? == 0 ]
+   then
+      w_time=`date "+%Y-%m-%d %H:%M:%S"` 
+      content="${w_time} | gitlab备份机器(IP:${IP}) | rsyncd --daemon 重启成功"
+   else
+      w_time=`date "+%Y-%m-%d %H:%M:%S"`
+      content="${w_time} | gitlab备份机器(IP:${IP}) | rsyncd --daemon 重启失败"
+   fi
+   echo ${content} >> ${rsync_start_log}
+   curl -d "mobile=${mobile}&content=${content}" ${sms_url} -s >/dev/null      
+else
+   echo '已经启动' >/dev/null
+fi
+
+添加定时任务：
+crontab -e
+*/1 * * * * /usr/bin/sh /data/auto_back/start_rsyncd.sh
+
+
+
+12、备份恢复（备份机）
+vim /data/auto_back/gitlab_backup.sh
+
+#!/bin/sh
+mobile='15898501229'
+IP='192.168.4.12'
+log_file='/data/log/gitlab_back.log'
+sms_url='http://test.sms.uu.cc:8081/SMS/sa/sms/send'
+backup_id=`ls -lt /data/gitlab/backups |awk 'NR==2{print $9}'|grep -o ".*10.1.0"`
+gitlab_backup="gitlab-rake gitlab:backup:restore BACKUP=${backup_id}"
+
+#检查备份服务配置重启、gitlab重启是否成功
+function check() {
+   if [ $1 != 0 ]
+   then 
+      w_time=`date "+%Y-%m-%d %H:%M:%S"`
+      content="${w_time} | $2"
+      echo ${content} >> ${log_file}
+      curl -d "mobile=${mobile}&content=gitlab备份服务器(IP:${IP})：${content}" ${sms_url} -s >/dev/null
+      exit
+   fi
+}
+
+w_time=`date "+%Y-%m-%d %H:%M:%S"`
+echo "备份恢复开始时间：${w_time}" >> ${log_file}
+gitlab-ctl stop unicorn >> ${log_file}
+gitlab-ctl stop sidekiq >> ${log_file}
+rsync -av /data/gitlab/conf/gitlab-secrets.json /etc/gitlab/gitlab-secrets.json > /dev/null
+
+#执行expect代码 
+/usr/bin/expect << EOF
+set timeout -1
+log_user 0
+log_file $log_file
+spawn $gitlab_backup
+expect {
+    "(yes/no)?" {
+         exp_send "yes\r"
+         send_log "gitlab:backup yes\n"
+         exp_continue
+    }
+}
+EOF
+
+gitlab-ctl reconfigure >/dev/null
+check "$?" '备份恢复重启配置gitlab-ctl reconfigure 失败'
+
+gitlab-ctl restart >> ${log_file}
+check "$?" '备份恢复重启服务器gitlab-ctl restart 失败'
+
+w_time=`date "+%Y-%m-%d %H:%M:%S"`
+echo "备份恢复结束时间：${w_time}" >> ${log_file}
+echo >> ${log_file}
+
+
+13、常见配置及命令
+
+重新加载配置：gitlab-ctl reconfigure
+重启服务：gitlab-ctl restart
+停止服务：gitlab-ctl start
+停止服务：gitlab-ctl stop
+
+日志位置：/var/log/gitlab
+查看所有日志：gitlab-ctl tail
+查看nginx日志：gitlab-ctl tail nginx/gitlab_access.log
+查看指定进程日志：gitlab-ctl tail postgresql
+
+重启数据库：gitlab-ctl restart postgresql
+gitlab配置文件：
+/etc/gitlab/gitlab.rb
+数据库配置文件：（修改内容后，需要修改对应的 /etc/gitlab/gitlab.rb 配置，否则重新加载gitlab配置文件后修改会失效）
+/var/opt/gitlab/gitlab-rails/etc/database.yml 
+/var/opt/gitlab/postgresql/data/postgresql.conf
+/var/opt/gitlab/postgresql/data/pg_hba.conf
+
+
+14、其他
+
+修改postgresql存储目录：sudo rsync -av /var/opt/gitlab/postgresql /data/gitlab/
+修改 /etc/gitlab/gitlab.rb
+
+postgresql['data_dir'] = "/data/gitlab/postgresql/data"
+postgresql['dir'] = "/data/gitlab/postgresql"
+postgresql['home'] = "/data/gitlab/postgresql"
+
+重新加载配置，并重启gitlab
+gitlab-ctl reconfigure
+gitlab-ctl restart
+
+注意：保留原位置目录 /var/opt/gitlab/postgresql （会创建 s.PGSQL.5432 文件）
+
+
+15、添加定时任务：
+crontab -e 
+
+查看定时任务：
+crontab -l 
+
+定时任务日志：
+tail -f /var/log/cron
+
+systemctl start crond.service
+systemctl status crond.service
+systemctl reload crond.service
+
+
+
+16、supervisor的安装与使用
+
+安装：
+yum install python-setuptools
+easy_install supervisor
+成功安装后可以登陆python控制台输入import supervisor 查看是否能成功加载
+
+
+echo_supervisord_conf > /etc/supervisord/supervisord.conf
+
+启动supervisor
+supervisord -c /etc/supervisord/supervisord.conf
+
+
+supervisorctl status
+supervisorctl start
+supervisorctl stop
+supervisorctl restart   
+
+
+vim /etc/supervisord/supervisord.conf
+[include]
+files = /etc/supervisord/conf.d/*.ini    ;可以指定一个或多个以.ini结束的配置文件
+
+
+如果修改了 /etc/supervisord/supervisord.conf ,需要执行 supervisorctl reload 来重新加载配置文件，否则不会生效
+
+
+
+cat /tmp/supervisord.log
+
+
+vim  /etc/supervisord/conf.d/rsyncd.ini
+[program:rsyncd]
+command=/usr/bin/rsync --daemon --config=/etc/rsyncd/rsyncd.conf ;程序启动命令
+;stdout 日志文件，需要注意当指定目录不存在时无法正常启动，所以需要手动创建目录（supervisord 会自动创建日志文件）
+stdout_logfile=/etc/supervisord/log/rsyncd.log
+autostart=true   ;在supervisord启动的时候也自动启动
+autorestart=true ;程序退出后自动重启
+startretries=5   ;启动失败自动重试次数，默认是3
+startsecs=10     ;启动10秒后没有异常退出，就表示进程正常启动了，默认为1秒
+
+
+chkconfig supervisord on
+chkconfig tomcat
+chkconfig tomcat off
+
+
+rsync -av /data/gitlab/conf/gitlab-secrets.json /etc/gitlab/gitlab-secrets.json
+
+
+
+
+参考材料：
+https://www.gitlab.cc/installation/#centos-7
+http://www.cnblogs.com/straycats/p/7637373.html
+
